@@ -17,23 +17,6 @@ parser.add_option('-c', '--config_file', action='store',
 
 cfg_path = options.config_file
 
-config = read_config(cfg_path)
-
-directory       = config['directory']
-remove_response = config['remove_response']
-if remove_response == 'True':
-	inventory       = read_inventory(config['inventory'])
-resampling_rate = float(config['resampling_rate'])
-window_length   = int(config['window_length'])
-freqmin         = float(config['freqmin'])
-freqmax         = float(config['freqmax'])
-order           = int(config['order'])
-
-output = cfg_path.replace('.cfg','.csv')
-
-'''============================== Functions =============================='''
-
-
 def read_config(filepath):
 	""" Reads the configuration file as a dictionary
 
@@ -55,6 +38,25 @@ def read_config(filepath):
 			config[variable] = value
 			config[variable.strip()] = value.strip()
 	return config
+
+config = read_config(cfg_path)
+csv_path = cfg_path.replace('cfg', 'csv')
+
+directory       = config['directory']
+remove_response = config['remove_response']
+if remove_response == 'True':
+	inventory       = read_inventory(config['inventory'])
+resampling_rate = float(config['resampling_rate'])
+window_length   = int(config['window_length'])
+freqmin         = float(config['freqmin'])
+freqmax         = float(config['freqmax'])
+order           = int(config['order'])
+
+output = cfg_path.replace('.cfg','.csv')
+
+'''============================== Functions =============================='''
+
+
 
 
 def butter_bandpass_filter(tr, freqmin, freqmax,order):
@@ -139,4 +141,4 @@ for filename in listdir(directory):
 
 print('\n==============================================================')
 print('\nWriting file...')
-df.to_csv('test.csv',index=False)
+df.to_csv(csv_path, index=False)
