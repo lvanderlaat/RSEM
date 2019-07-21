@@ -3,142 +3,103 @@ import pandas as pd
 from obspy import read, read_inventory, UTCDateTime
 from optparse import OptionParser
 from math import floor
-from os import listdir
-from scipy.signal import butter, lfilter
+from os import listdir, path
+import time
+from obspy_tools.obspy2numpy import tr2windowed_data
+from obspy_tools.filter import butter_bandpass_filter
+from config import Options
+from obspy_tools.stream_request import read_st
 
-'''======================= Parse configuration file ======================'''
+t0 = time.time()
 
+# Parse options
 Usage= 'Usage: python3 rsem.py -c config_file'
 
 parser = OptionParser(usage=Usage)
 parser.add_option('-c', '--config_file', action='store',
-		type='string', dest='config_file',help='Path to configuration file')
-(options, args) = parser.parse_args()
+        type='string', dest='config_file', help='Path to configuration file')
+options, args = parser.parse_args()
 
-cfg_path = options.config_file
+config_file = options.config_file
 
-def read_config(filepath):
-	""" Reads the configuration file as a dictionary
+opt = Options(config_file)
 
-	Parameters
-	----------
-	filepath: str
-		txt file path
+csv_path = path.split(config_file)[0]+'/'+opt.name+'.csv'
 
-	Returns
-	-------
-	config: dict
-	"""
-	config_file = open(filepath)
-	config = {}
-	for line in config_file:
-		line = line.strip()
-		if line and line[0] is not "#" and line[-1] is not "=":
-			variable,value = line.rsplit("=",1)
-			config[variable] = value
-			config[variable.strip()] = value.strip()
-	return config
-
-config = read_config(cfg_path)
-csv_path = cfg_path.replace('cfg', 'csv')
-
-directory       = config['directory']
-remove_response = config['remove_response']
-if remove_response == 'True':
-	inventory       = read_inventory(config['inventory'])
-resampling_rate = float(config['resampling_rate'])
-window_length   = int(config['window_length'])
-freqmin         = float(config['freqmin'])
-freqmax         = float(config['freqmax'])
-order           = int(config['order'])
-
-output = cfg_path.replace('.cfg','.csv')
-
-'''============================== Functions =============================='''
+if opt.remove_resp:
+    inventory = read_inventory(opt.inventory)
+else:
+    inventory = None
 
 
+def pre_process(tr, inventory, freqmin,freqmax,order,resampling_rate):
 
+    print('\nPre-processing')
 
-def butter_bandpass_filter(tr, freqmin, freqmax,order):
-	sampling_rate = tr.stats['sampling_rate']
-	nyquist = 0.5 * sampling_rate
-	low = freqmin / nyquist
-	high = freqmax / nyquist
-	b, a = butter(order, [low, high], btype='band')
-	tr.data = lfilter(b, a, tr.data)
-	return
+    # Decimate
+    sampling_rate = tr.stats.sampling_rate
+    if not opt.remove_resp:
+        tr.detrend()
+    tr.decimate(factor=int(sampling_rate/resampling_rate))
 
+    # Remove response
+    if opt.remove_resp:
+        print('\nRemoving instrument response...')
+        tr.stats.channel = 'BH Z'
+        tr.stats.network = 'TC'
+        tr.remove_response(inventory)
+        tr.detrend()
 
-def pre_process(tr,freqmin,freqmax,order,resampling_rate):
-	tr.detrend()
-	sampling_rate = tr.stats['sampling_rate']
-	tr.decimate(factor=int(sampling_rate/resampling_rate))
-	butter_bandpass_filter(tr, freqmin, freqmax,order)
-
-
-def tr2windowed_data(tr,window_length):
-
-	""" Create a NumPy array with a trace windowed.
-
-	Parameters
-	----------
-	tr: obspy tr
-		Trace for analysis
-	window: int
-		Window of analysis [samples]
-
-	Returns
-	-------
-	data_windowed: np array
-		2D array (number of window, window length)
-	total_length: int
-		New length in samples to fit a integer number of windows
-	"""
-
-	npts = tr.stats['npts']
-	starttime = tr.stats['starttime']
-	sampling_rate = tr.stats['sampling_rate']
-
-	n_windows = floor(npts/window_length)
-	total_length = window_length * n_windows
-	data_windowed = np.zeros((1,n_windows,window_length))
-
-	tr_data = tr.data[:total_length]
-	tr_data = np.reshape(tr_data,(n_windows,window_length))
-	data_windowed = tr_data
-
-	timestamps = np.arange(0,total_length/sampling_rate,
-		window_length/sampling_rate) + starttime.timestamp
-	utcdatetime = np.vectorize(UTCDateTime)(timestamps)
-
-	return utcdatetime,data_windowed,total_length
-
-
-'''============================== Processing ============================='''
+    # Filter 
+    butter_bandpass_filter(tr, freqmin, freqmax, order)
 
 columns = ['utcdatetime','rms']
 
 df = pd.DataFrame(index=range(0),columns=columns)
 
-for filename in listdir(directory):
-	print('\n==============================================================')
-	print('\nReading file {}...'.format(filename))
-	tr = read(directory+filename)[0]
+count = 0
+for filename in listdir(opt.directory):
+    t1 = time.time()
 
-	if remove_response == 'True':
-		print('\nRemoving instrument response...')
-		tr.remove_response(inventory)
-	print('\nPre-processing')
-	pre_process(tr,freqmin,freqmax,order,resampling_rate)
+    print('\n==============================================================')
+    print('\nReading file {}...'.format(filename))
+    tr = read(opt.directory+filename)[0]
 
-	utcdatetime,data_windowed,total_length = tr2windowed_data(tr,
-		window_length)
+    pre_process(tr, inventory,  opt.freqmin, opt.freqmax, opt.order,
+                opt.resampling_rate)
 
-	rms = np.sqrt(np.mean(data_windowed**2,axis=1))
+    try:
+        utcdatetime, data_windowed, total_length = tr2windowed_data(tr,
+                                                       opt.window_length)
+        rms = np.sqrt(np.mean(data_windowed**2, axis=1))
+        df_trace = pd.DataFrame(np.vstack([utcdatetime, rms]).T,
+                                 columns=columns)
+        df = df.append(df_trace, ignore_index=True)
+    except:
+       pass
 
-	df_trace = pd.DataFrame(np.vstack([utcdatetime,rms]).T,columns=columns)
-	df = df.append(df_trace,ignore_index=True)
+    t2 = time.time()
+    time_per_file = t2 - t1
+    print('\nElapsed time with this file: {} s'.format(round(t2-t1, 0)))
+    count += 1
+
+    remaining_files = len(listdir(opt.directory)) - count
+    remaining_time  = time_per_file * remaining_files
+    if remaining_time <= 60:
+        remaining_time = round(remaining_time, 0)
+        time_unit = 'seconds'
+    if remaining_time > 60 and remaining_time <= 3600:
+        remaining_time = round(remaining_time/60, 0)
+        time_unit = 'minutes'
+    elif remaining_time > 3660:
+        remaining_time = round(remaining_time/3600, 2)
+        time_unit = 'hours'
+    print('\nEstimated remaining time: {} {}'.format(remaining_time,
+                                                       time_unit))
 
 print('\n==============================================================')
 print('\nWriting file...')
 df.to_csv(csv_path, index=False)
+
+t1 = time.time()
+print('Total time elapsed: {} s'.format(round(t1-t0, 0)))
