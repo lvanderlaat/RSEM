@@ -21,9 +21,9 @@ class Options(object):
         self.inventory       = config.get('DATA', 'inventory') if\
                                 config.has_option('DATA', 'inventory') else None
 
-        self.resampling_rate = config.getfloat('DATA', 'resampling_rate')\
+        self.factor = config.getint('DATA', 'factor')\
                                     if config.has_option('DATA',
-                                                  'resampling_rate') else 50.
+                                                  'factor') else 2
 
         self.window_length = config.getint('DATA', 'window_length') if\
                                     config.has_option('DATA',

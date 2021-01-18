@@ -31,22 +31,18 @@ if opt.remove_resp:
 else:
     inventory = None
 
-
-def pre_process(tr, inventory, freqmin,freqmax,order,resampling_rate):
+def pre_process(tr, inventory, freqmin, freqmax, order, factor):
 
     print('\nPre-processing')
 
     # Decimate
-    sampling_rate = tr.stats.sampling_rate
     if not opt.remove_resp:
         tr.detrend()
-    tr.decimate(factor=int(sampling_rate/resampling_rate))
+    tr.decimate(factor=factor)
 
     # Remove response
     if opt.remove_resp:
         print('\nRemoving instrument response...')
-        tr.stats.channel = 'BH Z'
-        tr.stats.network = 'TC'
         tr.remove_response(inventory)
         tr.detrend()
 
@@ -66,7 +62,7 @@ for filename in listdir(opt.directory):
     tr = read(opt.directory+filename)[0]
 
     pre_process(tr, inventory,  opt.freqmin, opt.freqmax, opt.order,
-                opt.resampling_rate)
+                opt.factor)
 
     try:
         utcdatetime, data_windowed, total_length = tr2windowed_data(tr,
